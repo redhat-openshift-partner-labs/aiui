@@ -1,0 +1,251 @@
+name: CI/CD Pipeline for OpenShift Partner Labs App
+
+on:
+  pull_request:
+    branches: [ main, develop ]
+  push:
+    branches: [ main ]
+
+env:
+  # Container registry configuration
+  REGISTRY: quay.io  # Change to your registry (docker.io, ghcr.io, etc.)
+  IMAGE_NAME: rhopl/app  # Update with your image path
+
+  # OpenShift configuration
+  OPENSHIFT_SERVER: ${{ secrets.OPENSHIFT_SERVER }}
+  OPENSHIFT_SKIP_TLS_VERIFY: true
+  OPENSHIFT_PROJECT: ${{ secrets.OPENSHIFT_PROJECT }}
+  DEPLOYMENT_NAME: openshift-partner-labs-app-ai  # Update with your deployment name
+
+jobs:
+  # Job 1: Validate and test the application
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '>=22.16.0'  # Adjust to your Node version
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run linting
+        run: npm run lint || true  # Continue on lint warnings
+
+      - name: Run tests
+        run: npm test -- --coverage --watchAll=false
+
+      - name: Build application
+        run: |
+          # Build with error handling
+          npm run build || { echo "Build failed"; exit 1; }
+
+          # Debug: List files to verify build output
+          echo "=== Listing root directory ==="
+          ls -la
+
+          # Check common build directories
+          if [ -d "build" ]; then
+            echo "=== Found 'build' directory ==="
+            ls -la build/
+          elif [ -d "dist" ]; then
+            echo "=== Found 'dist' directory ==="
+            ls -la dist/
+          else
+            echo "=== No standard build directory found ==="
+            echo "=== Checking for any generated directories ==="
+            find . -type d -name "build" -o -name "dist" -o -name "out" | head -20
+          fi
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts
+          # Try multiple possible paths
+          path: |
+            build/
+            dist/
+            out/
+          if-no-files-found: error  # Fail if no files found
+          retention-days: 1
+  # Job 2: Build and push container image (only on main branch push)
+  build-and-push:
+    needs: validate
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    outputs:
+      image-uri: ${{ steps.image.outputs.uri }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-artifacts
+          path: ./
+
+      - name: Verify downloaded artifacts
+        run: |
+          echo "=== Checking downloaded artifacts ==="
+          ls -la
+          # Find the actual build directory
+          BUILD_DIR=$(find . -type d \( -name "build" -o -name "dist" -o -name "out" \) -maxdepth 1 | head -1)
+          echo "BUILD_DIR=$BUILD_DIR" >> $GITHUB_ENV
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Generate image URI
+        id: image
+        run: |
+          # Simple, reliable tag using timestamp and SHA
+          TIMESTAMP=$(date -u +%Y%m%d%H%M%S)
+          SHA_SHORT=${GITHUB_SHA::7}
+          IMAGE_TAG="${TIMESTAMP}-${SHA_SHORT}"
+          IMAGE_URI="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${IMAGE_TAG}"
+
+          echo "Image URI: $IMAGE_URI"
+          echo "uri=$IMAGE_URI" >> $GITHUB_OUTPUT
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.image.outputs.uri }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64
+          build-args: |
+            BUILD_DIR=${{ env.BUILD_DIR || 'dist' }}
+
+  # Job 3: Deploy to OpenShift
+  deploy:
+    needs: build-and-push
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Install OpenShift CLI
+        run: |
+          # Download and install oc CLI
+          wget https://mirror.openshift.com/pub/openshift-v4/clients/ocp/latest/openshift-client-linux.tar.gz
+          tar xvf openshift-client-linux.tar.gz
+          sudo mv oc /usr/local/bin/
+          oc version --client
+
+      - name: Authenticate with OpenShift
+        run: |
+          # Option 1: Use CA certificate (recommended for production)
+          if [ -n "${{ secrets.OPENSHIFT_CA_CERT }}" ]; then
+            echo "${{ secrets.OPENSHIFT_CA_CERT }}" > ca.crt
+            oc login --token=${{ secrets.OPENSHIFT_TOKEN }} \
+              --server=${{ env.OPENSHIFT_SERVER }} \
+              --certificate-authority=ca.crt
+          # Option 2: Skip TLS verification (use only for development)
+          elif [ "${{ env.OPENSHIFT_SKIP_TLS_VERIFY }}" == "true" ]; then
+            echo "WARNING: Skipping TLS verification - not recommended for production"
+            oc login --token=${{ secrets.OPENSHIFT_TOKEN }} \
+              --server=${{ env.OPENSHIFT_SERVER }} \
+              --insecure-skip-tls-verify=true
+          else
+            echo "ERROR: No CA certificate provided and TLS verification not disabled"
+            echo "Please add OPENSHIFT_CA_CERT secret or set OPENSHIFT_SKIP_TLS_VERIFY variable"
+            exit 1
+          fi
+
+          # Verify login and switch to project
+          oc whoami
+          oc project ${{ env.OPENSHIFT_PROJECT }}
+
+      - name: Update deployment image
+        env:
+          FULL_IMAGE: ${{ needs.build-and-push.outputs.image-uri }}
+        run: |
+          # Use the image URI from the build job
+          FULL_IMAGE=${{ env.FULL_IMAGE }}
+
+          echo "=== Deployment Update ==="
+          echo "Deploying image: $FULL_IMAGE"
+
+          # Update the deployment with the new image
+          oc set image deployment/${{ env.DEPLOYMENT_NAME }} \
+            ${{ env.DEPLOYMENT_NAME }}=$FULL_IMAGE \
+            --record
+
+          # Wait for rollout to complete
+          oc rollout status deployment/${{ env.DEPLOYMENT_NAME }} --timeout=10m
+
+      - name: Verify deployment
+        run: |
+          # Check deployment status
+          oc get deployment ${{ env.DEPLOYMENT_NAME }}
+          oc get pods -l app=${{ env.DEPLOYMENT_NAME }}
+
+          # Optional: Run smoke tests against the deployed application
+          # ROUTE=$(oc get route ${{ env.DEPLOYMENT_NAME }} -o jsonpath='{.spec.host}')
+          # curl -f https://$ROUTE/health || exit 1
+
+      - name: Create deployment annotation
+        run: |
+          # Add metadata about this deployment
+          oc annotate deployment/${{ env.DEPLOYMENT_NAME }} \
+            "github.com/commit-sha=${{ github.sha }}" \
+            "github.com/run-id=${{ github.run_id }}" \
+            "github.com/actor=${{ github.actor }}" \
+            --overwrite
+
+  # Optional: Rollback job in case of failure
+  rollback:
+    needs: deploy
+    if: failure()
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Install OpenShift CLI
+        run: |
+          wget https://mirror.openshift.com/pub/openshift-v4/clients/ocp/latest/openshift-client-linux.tar.gz
+          tar xvf openshift-client-linux.tar.gz
+          sudo mv oc /usr/local/bin/
+
+      - name: Authenticate with OpenShift
+        run: |
+          # Same authentication logic as deploy job
+          if [ -n "${{ secrets.OPENSHIFT_CA_CERT }}" ]; then
+            echo "${{ secrets.OPENSHIFT_CA_CERT }}" > ca.crt
+            oc login --token=${{ secrets.OPENSHIFT_TOKEN }} \
+              --server=${{ env.OPENSHIFT_SERVER }} \
+              --certificate-authority=ca.crt
+          elif [ "${{ env.OPENSHIFT_SKIP_TLS_VERIFY }}" == "true" ]; then
+            oc login --token=${{ secrets.OPENSHIFT_TOKEN }} \
+              --server=${{ env.OPENSHIFT_SERVER }} \
+              --insecure-skip-tls-verify=true
+          else
+            echo "ERROR: No CA certificate provided and TLS verification not disabled"
+            exit 1
+          fi
+          oc project ${{ env.OPENSHIFT_PROJECT }}
+
+      - name: Rollback deployment
+        run: |
+          echo "Deployment failed, rolling back..."
+          oc rollout undo deployment/${{ env.DEPLOYMENT_NAME }}
+          oc rollout status deployment/${{ env.DEPLOYMENT_NAME }} --timeout=5m

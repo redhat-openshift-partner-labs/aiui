@@ -1,0 +1,36 @@
+cookie:
+  expiry_days: 1
+  key: some_signature_key
+  name: some_cookie_name
+credentials:
+  google:
+    redirect_uri: "http://localhost:8501"
+preauthorized:
+  emails:
+    # Note: All @redhat.com email addresses are automatically authorized
+    - "no-reply@redhat.com"
+
+# use local ollama service
+ollama:
+  enabled: false
+  host: "http://localhost:11434"
+  chat_model: "llama3.2:3b-instruct-fp16"
+  agent_model: "deepseek-r1:8b"
+  options:
+    temperature: 0.1
+
+# llm_config is the top-level key used throughout the project
+# for configuring the LLMs used and their hyperparameters
+llm_config:
+  chat_model: "gemini-2.5-flash-preview-05-20"
+  summary_model: "gemini-2.0-flash"
+  rag_model: "gemini-2.0-flash"
+  temperature: 0.0
+
+vllm_config:
+  secure: true
+  base_url: "apps.gpu.osdu.opdev.io/v1"
+  api_key: "EMPTY"
+  namespace: "llama"
+  chat_model: "llama3"
+  safety_model: "llama-guard"

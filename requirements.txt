@@ -4,3 +4,5 @@ PyYAML
 google-auth
 google-auth-oauthlib
 requests
+openai
+ollama

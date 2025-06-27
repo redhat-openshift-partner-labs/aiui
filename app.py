@@ -1,3 +1,4 @@
+import os
 from datetime import datetime
 from openai import OpenAI
 import yaml
@@ -40,13 +41,13 @@ def create_oauth_flow() -> Flow:
         Flow: Google OAuth flow
     """
     # Ensure redirect URI is properly formatted
-    redirect_uri = config["credentials"]["google"]["redirect_uri"]
+    redirect_uri = os.environ.get("GOOGLE_REDIRECT_URI", "http://localhost:8501")
 
     # Create client configuration
     client_config = {
         "web": {
-            "client_id": config["credentials"]["google"]["client_id"],
-            "client_secret": config["credentials"]["google"]["client_secret"],
+            "client_id": os.environ.get("GOOGLE_CLIENT_ID", ""),
+            "client_secret": os.environ.get("GOOGLE_CLIENT_SECRET", ""),
             "auth_uri": "https://accounts.google.com/o/oauth2/auth",
             "token_uri": "https://oauth2.googleapis.com/token",
             "redirect_uris": [redirect_uri]
@@ -297,7 +298,10 @@ def main():
             # Model and session information
             st.divider()
 
-            st.caption(f"Model: {config['ollama']['chat_model']}")
+            if not config["ollama"]["enabled"]:
+                st.caption(f"Model: {config['vllm_config']['chat_model']}")
+            else:
+                st.caption(f"Model: {config['ollama']['chat_model']}")
             st.caption(f"Session started: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
 
             # Connection status indicator
@@ -324,22 +328,25 @@ def main():
         # Chat input handling
         # The walrus operator := captures the input while checking if it exists
         if prompt := st.chat_input("Type your message here..."):
-            # Display a user message immediately
+            # Immediately display the user message
             with st.chat_message("user"):
                 st.markdown(prompt)
 
-            # Generate and display assistant response
-            with st.chat_message("assistant"):
-                with st.spinner("Thinking..."):
-                    if config["ollama"]["enabled"]:
-                        response = get_ollama_response(prompt)
-                    else:
-                        response = get_vllm_response(prompt)
+            # Add the user message to state
+            st.session_state.messages.append({"role": "user", "content": prompt})
 
-                    st.markdown(response)
-                    # Add user prompt and assistant response to chat for user visibility
-                    st.session_state.messages.append({"role": "user", "content": prompt})
-                    st.session_state.messages.append({"role": "assistant", "content": response})
+            # Get a response from the model
+            with st.spinner("Thinking..."):
+                if config["ollama"]["enabled"]:
+                    response = get_ollama_response(prompt)
+                else:
+                    response = get_vllm_response(prompt)
+
+            # Add the model response to state
+            st.session_state.messages.append({"role": "assistant", "content": response})
+
+            # Reload streamlit
+            st.rerun()
 
 
 if __name__ == "__main__":

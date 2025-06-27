@@ -1,0 +1,106 @@
+# Default values for openshift-partner-labs
+replicaCount: 1
+
+image:
+  repository: quay.io/rhopl/app
+  tag: "ai-latest"
+  pullPolicy: IfNotPresent
+
+# OpenShift specific settings
+openshift:
+  enabled: true
+  route:
+    enabled: true
+    host: ""  # Leave empty for OpenShift to auto-generate
+    tls:
+      enabled: true
+      termination: edge
+      insecureEdgeTerminationPolicy: Redirect
+
+service:
+  type: ClusterIP
+  port: 8501
+  targetPort: 8501
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+# Configuration for the application
+config:
+  # Google OAuth credentials - these will be stored in a Secret
+  google:
+    clientId: ""  # Will be overridden by secret
+    clientSecret: ""  # Will be overridden by secret
+    redirectUri: "https://your-app-route/oauth/callback"
+  
+  # Preauthorized users
+  preauthorized:
+    emails:
+      - "no-reply@redhat.com"
+
+  # Ollama configuration
+  ollama:
+    host: "localhost:11434"
+    chatModel: "llama2"
+    options:
+      temperature: 0.7
+      top_p: 0.9
+      max_tokens: 2048
+
+# Environment variables
+env:
+  - name: STREAMLIT_SERVER_PORT
+    value: "8501"
+  - name: STREAMLIT_SERVER_ADDRESS
+    value: "0.0.0.0"
+  - name: STREAMLIT_SERVER_HEADLESS
+    value: "true"
+  - name: STREAMLIT_BROWSER_GATHER_USAGE_STATS
+    value: "false"
+
+# Security context
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1001
+  runAsGroup: 0
+  fsGroup: 0
+  capabilities:
+    drop:
+      - ALL
+
+# Pod security context
+podSecurityContext:
+  fsGroup: 0
+
+# Liveness and readiness probes
+livenessProbe:
+  httpGet:
+    path: /
+    port: 8501
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /
+    port: 8501
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+# Node selector
+nodeSelector: {}
+
+# Tolerations
+tolerations: []
+
+# Affinity
+affinity: {}

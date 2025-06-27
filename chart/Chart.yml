@@ -1,0 +1,17 @@
+apiVersion: v2
+name: openshift-partner-labs-app-ai
+description: A Helm chart for OpenShift Partner Labs AI application
+version: 0.1.0
+appVersion: "1.0.0"
+type: application
+keywords:
+  - streamlit
+  - python
+  - oauth
+  - ollama
+home: https://github.com/rhopl/app
+sources:
+  - https://github.com/rhopl/app
+maintainers:
+  - name: Red Hat
+    email: no-reply@redhat.com

@@ -1,0 +1,6 @@
+streamlit
+streamlit-authenticator
+PyYAML
+google-auth
+google-auth-oauthlib
+requests

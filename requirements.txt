@@ -6,3 +6,5 @@ google-auth-oauthlib
 requests
 openai
 ollama
+toolbox-core
+mcp

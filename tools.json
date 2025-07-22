@@ -1,0 +1,20 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "get-labs-by-state",
+      "description": "Use this tool to get an OpenShift Partner Lab based on its current state. DO NOT use this tool to get an OpenShift Partner Lab except when the user is asking to return a lab based on the lab's current state. This tool queries a MySQL database and returns a list of JSON objects where each object contains all the information about a lab.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "description": "The state of the lab. Must be one of the following: pending, approved, active, extended, denied, or completed.",
+            "enum": ["pending", "approved", "active", "extended", "denied", "completed"]
+          }
+        },
+        "required": ["state"]
+      }
+    }
+  }
+]

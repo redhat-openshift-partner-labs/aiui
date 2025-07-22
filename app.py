@@ -5,9 +5,12 @@ import yaml
 import streamlit as st
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
-import requests
+import httpx
 from typing import Dict, Optional, Tuple
+
+import system_prompts
 from ollama_manager import OllamaManager
+from toolbox_core import ToolboxSyncClient
 
 # Page configuration
 st.set_page_config(
@@ -74,7 +77,7 @@ def get_user_info(credentials: Credentials) -> Dict:
     Returns:
         Dict: User information
     """
-    response = requests.get(
+    response = httpx.get(
         "https://www.googleapis.com/oauth2/v1/userinfo",
         headers={"Authorization": f"Bearer {credentials.token}"}
     )
@@ -164,6 +167,9 @@ def handle_oauth() -> Tuple[bool, Optional[Dict]]:
 
     return st.session_state.get("authenticated", False), st.session_state.get("user_info", None)
 
+def get_system_prompt(user_prompt: str = None, persona: str = None) -> str:
+    return system_prompts.default_persona
+
 def init_session_state() -> None:
     # Initialize empty message history for storing chat conversations
     if 'messages' not in st.session_state:
@@ -246,18 +252,29 @@ def get_vllm_response(prompt: str) -> str:
         # Return the error message
         return f"❌ Error: {str(e)}"
 
+def use_toolbox_tool(tool_name: str, tool_params: Dict) -> str:
+    toolbox = ToolboxSyncClient("http://localhost:5000")
+    tool = toolbox.load_tool(tool_name)
+    result = tool(**tool_params)
+    return result
+
+
 # Main application
 def main():
-    """Main application function."""
+    user_info = {}
+
     # Initialize session state
     if "authenticated" not in st.session_state:
         st.session_state["authenticated"] = False
 
-    # Check authentication
-    authenticated, user_info = handle_oauth()
+    if not config["credentials"]["enabled"]:
+        st.session_state["authenticated"] = True
+    else:
+        # Check authentication
+        authenticated, user_info = handle_oauth()
 
     # If not authenticated, show the login page
-    if not authenticated:
+    if not st.session_state["authenticated"]:
         st.title("OpenShift Partner Labs")
         st.write("Please log in with your Google account to continue.")
 
@@ -287,8 +304,8 @@ def main():
             st.subheader(f"Welcome, {user_info.get('name', 'User')}!")
 
             # Display user info
-            st.image(user_info.get("picture", ""))
-            st.write(f"Email: {user_info.get('email', 'N/A')}")
+            st.image(user_info.get("picture", "https://i.pravatar.cc/150"))
+            st.write(f"Email: {user_info.get('email', 'no-reply@redhat.com')}")
 
             # Display chat statistics
             st.divider()
@@ -327,23 +344,28 @@ def main():
 
         # Chat input handling
         # The walrus operator := captures the input while checking if it exists
-        if prompt := st.chat_input("Type your message here..."):
+        if user_prompt := st.chat_input("Type your message here..."):
             # Immediately display the user message
             with st.chat_message("user"):
-                st.markdown(prompt)
+                st.markdown(user_prompt)
 
             # Add the user message to state
-            st.session_state.messages.append({"role": "user", "content": prompt})
+            st.session_state.messages.append({"role": "user", "content": user_prompt})
+
+            # TODO: get_system_prompt should send the user_prompt to a LLM with the intent
+            #  of selecting a system prompt based on the user prompt.
+            system_prompt = get_system_prompt(user_prompt)
 
             # Get a response from the model
             with st.spinner("Thinking..."):
                 if config["ollama"]["enabled"]:
-                    response = get_ollama_response(prompt)
+                    response = get_ollama_response(system_prompt + user_prompt + "\n</user>")
                 else:
-                    response = get_vllm_response(prompt)
+                    response = get_vllm_response(system_prompt + user_prompt + "\n</user>")
 
             # Add the model response to state
             st.session_state.messages.append({"role": "assistant", "content": response})
+            print(response)
 
             # Reload streamlit
             st.rerun()

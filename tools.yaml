@@ -1,0 +1,33 @@
+sources:
+  mysql-container:
+    kind: mysql
+    host: 127.0.0.1
+    port: 3306
+    database: openshift_partner_labs_app
+    user: mcpuser
+    password: mcpuser
+
+tools:
+  get-labs-by-state:
+    kind: mysql-sql
+    source: mysql-container
+    description: |
+      Use this tool to get an OpenShift Partner Lab based on its current state.
+      The state can be one of the following states: <pending|approved|active|extended|denied|completed>
+      DO NOT use this tool to get an OpenShift Partner Lab except when the user is asking to return a lab based
+      on the lab's current state.
+      This tool queries a MySQL database and returns a list of JSON objects where each object contains all the 
+      information about a lab.
+      Example:
+      {{
+          "state": "active"
+      }}
+    parameters:
+      - name: state
+        type: string
+        description: The state of the lab; one of active|approved|pending|completed
+    statement: SELECT * FROM labs WHERE state LIKE ?;
+
+toolsets:
+  partner_labs:
+    - get-labs-by-state

@@ -1,5 +1,7 @@
-from ollama import Client, ChatResponse
+import json
 import yaml
+
+from ollama import Client, ChatResponse
 from typing import Dict
 
 
@@ -26,26 +28,22 @@ class OllamaManager:
         self.client = Client(host=host)
         self.model = model
         self.options = options
-        self.tools = tools or []  # Default tools available for all chats
 
-    def chat(self, messages, tools=None, tool_choice=None) -> ChatResponse:
+        with open("tools.json", "r") as f:
+            self.tools = json.load(f)  # Load tools from the JSON file
+
+    def chat(self, messages) -> ChatResponse:
         """Chat with optional tool support"""
         # Build request parameters
         params = {
             'model': self.model,
             'messages': messages,
+            #'tools': self.tools,
             'options': self.options
         }
 
-        # Use provided tools or default tools
-        if tools or self.tools:
-            params['tools'] = tools or self.tools
-
-        # Add tool choice if specified
-        if tool_choice:
-            params['tool_choice'] = tool_choice
-
         response = self.client.chat(**params)
+        print(response)
         return response
 
     def chat_stream(self, messages, tools=None):

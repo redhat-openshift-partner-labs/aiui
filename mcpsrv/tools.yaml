@@ -1,0 +1,28 @@
+sources:
+  mysql-container:
+    kind: mysql
+    host: 127.0.0.1
+    port: 3306
+    database: openshift_partner_labs_app
+    user: mcpuser
+    password: mcpuser
+
+tools:
+  get-labs-by-state:
+    kind: mysql-sql
+    source: mysql-container
+    description: |
+      Search for labs based on state.
+      Example:
+      {{
+          "state": "active"
+      }}
+    parameters:
+      - name: state
+        type: string
+        description: The state of the lab; one of active|approved|pending|completed
+    statement: SELECT * FROM labs WHERE state LIKE ?;
+
+toolsets:
+  partner_labs:
+    - get-labs-by-state

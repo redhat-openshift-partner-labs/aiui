@@ -3,6 +3,7 @@ cookie:
   key: some_signature_key
   name: some_cookie_name
 credentials:
+  enabled: false
   google:
     redirect_uri: "http://localhost:8501"
 preauthorized:
@@ -12,9 +13,9 @@ preauthorized:
 
 # use local ollama service
 ollama:
-  enabled: false
+  enabled: true
   host: "http://localhost:11434"
-  chat_model: "llama3.2:3b-instruct-fp16"
+  chat_model: "llama3.2:3b"
   agent_model: "deepseek-r1:8b"
   options:
     temperature: 0.1

@@ -6,6 +6,9 @@ podman run -d -it --replace --name mysql-container -e MYSQL_ROOT_PASSWORD=rootpa
 && podman exec mysql-container mysql -uroot -prootpass -e "GRANT ALL PRIVILEGES ON *.* TO 'mcpuser'@'%' WITH GRANT OPTION; FLUSH PRIVILEGES;
 ```
 
+NOTE:
+On macOS specifically remove `--network host` and use proper port mapping `(-p 3306:3306)` instead.
+
 import the mysql_dummy_data.sql file (you'll need mysql client)
 ```shell
 mysql -h localhost --protocol tcp -u mcpuser -pmcpuser < mysql_dummy_data.sql
@@ -27,6 +30,7 @@ pip install -r requirements.txt
 toolbox --log-level DEBUG --tools-file "tools.yaml"
 ```
 
+make sure ollama is running.  if not run `ollama serve`.
 update the config.yaml ollama section to point to your local ollama instance and available model
 
 run the application

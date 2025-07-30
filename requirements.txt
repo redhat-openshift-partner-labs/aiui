@@ -7,4 +7,4 @@ requests
 openai
 ollama
 toolbox-core
-mcp
+mcp>=1.0.0

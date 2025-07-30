@@ -11,6 +11,7 @@ from typing import Dict, Optional, Tuple
 import system_prompts
 from ollama_manager import OllamaManager
 from toolbox_core import ToolboxSyncClient
+from mcpclt import MCPClient
 
 # Page configuration
 st.set_page_config(
@@ -187,6 +188,10 @@ def init_session_state() -> None:
     if 'vllm' not in st.session_state:
         st.session_state.vllm = None
 
+    # Initialize MCP client
+    if 'mcp_client' not in st.session_state:
+        st.session_state.mcp_client = None
+
 def initialize_ollama():
     try:
         # Create a new instance of the ollama wrapper class
@@ -253,10 +258,92 @@ def get_vllm_response(prompt: str) -> str:
         return f"❌ Error: {str(e)}"
 
 def use_toolbox_tool(tool_name: str, tool_params: Dict) -> str:
-    toolbox = ToolboxSyncClient("http://localhost:5000")
+    # Use 127.0.0.1 instead of localhost to avoid DNS issues
+    toolbox = ToolboxSyncClient("http://127.0.0.1:5000")
     tool = toolbox.load_tool(tool_name)
     result = tool(**tool_params)
     return result
+
+async def initialize_mcp_client():
+    """Initialize the MCP client and connect to the server"""
+    try:
+        if st.session_state.mcp_client is None:
+            st.session_state.mcp_client = MCPClient()
+            
+            # Path to the MCP server
+            server_path = "mcpsrv/server.py"
+            
+            # Connect to the MCP server
+            await st.session_state.mcp_client.connect_to_server(server_path)
+            
+        return True
+    except Exception as e:
+        st.error(f"Failed to initialize MCP client: {str(e)}")
+        return False
+
+def get_response_with_tools(prompt: str, use_ollama: bool = True) -> str:
+    """Get response from AI with tool calling support"""
+    import asyncio
+    import json
+    import re
+    
+    try:
+        # First, get a regular response from the AI
+        if use_ollama:
+            ai_response = get_ollama_response(prompt)
+        else:
+            ai_response = get_vllm_response(prompt)
+        
+        # Check if the AI response suggests using tools
+        # Look for patterns that indicate lab state queries
+        lab_state_patterns = [
+            r'(?i)\b(active|pending|approved|completed|extended|denied)\s+labs?\b',
+            r'(?i)labs?\s+(?:with|in|that are|in the)\s+(active|pending|approved|completed|extended|denied)\s+state',
+            r'(?i)show\s+(?:me\s+)?(?:all\s+)?(active|pending|approved|completed|extended|denied)\s+labs?',
+            r'(?i)list\s+(?:all\s+)?(active|pending|approved|completed|extended|denied)\s+labs?',
+            r'(?i)find\s+labs?\s+(?:with\s+)?(active|pending|approved|completed|extended|denied)',
+            r'(?i)(?:how many|count)\s+labs?\s+are\s+(?:in\s+)?(active|pending|approved|completed|extended|denied)',
+            r'(?i)get\s+(?:me\s+)?(active|pending|approved|completed|extended|denied)\s+labs?',
+            r'(?i)labs?\s+(?:are\s+)?currently\s+(active|pending|approved|completed|extended|denied)',
+            r'(?i)what\s+labs?\s+are\s+(?:currently\s+)?(active|pending|approved|completed|extended|denied)',
+            r'(?i)labs?\s+(?:are\s+)?(?:currently\s+)?(pending|approved|completed|extended|denied)'
+        ]
+        
+        # Extract state from the original prompt
+        detected_state = None
+        for pattern in lab_state_patterns:
+            match = re.search(pattern, prompt)
+            if match:
+                detected_state = match.group(1).lower()
+                break
+        
+        # If we detected a lab state query, use the tool
+        if detected_state and detected_state in ['active', 'pending', 'approved', 'completed', 'extended', 'denied']:
+            try:
+                # Use the toolbox tool directly
+                result = use_toolbox_tool('get-labs-by-state', {'state': detected_state})
+                
+                # Format the response nicely
+                tool_response = f"\n\n**Lab Query Results (State: {detected_state})**\n"
+                tool_response += f"```json\n{json.dumps(result, indent=2) if not isinstance(result, str) else result}\n```\n"
+                
+                # Combine AI response with tool results
+                return ai_response + tool_response
+                
+            except Exception as tool_error:
+                # If tool fails, just return the AI response with an error note
+                return ai_response + f"\n\n*Note: Could not retrieve lab data: {str(tool_error)}*"
+        
+        # Return regular AI response if no tool usage detected
+        return ai_response
+        
+    except Exception as e:
+        st.error(f"Error in tool-enabled response: {str(e)}")
+        # Fall back to regular response
+        if use_ollama:
+            return get_ollama_response(prompt)
+        else:
+            return get_vllm_response(prompt)
 
 
 # Main application
@@ -326,6 +413,13 @@ def main():
                 st.caption("🟢 Connected")
             else:
                 st.caption("🔴 Disconnected")
+            
+            # Tool availability indicator
+            st.divider()
+            st.subheader("🔧 Available Tools")
+            st.caption("🏭 get-labs-by-state")
+            st.caption("Query lab information by state")
+            st.caption("*States: active, pending, approved, completed, extended, denied*")
 
             # Logout button
             if st.button("Logout"):
@@ -356,12 +450,10 @@ def main():
             #  of selecting a system prompt based on the user prompt.
             system_prompt = get_system_prompt(user_prompt)
 
-            # Get a response from the model
+            # Get a response from the model with tool support
             with st.spinner("Thinking..."):
-                if config["ollama"]["enabled"]:
-                    response = get_ollama_response(system_prompt + user_prompt + "\n</user>")
-                else:
-                    response = get_vllm_response(system_prompt + user_prompt + "\n</user>")
+                full_prompt = system_prompt + user_prompt + "\n</user>"
+                response = get_response_with_tools(full_prompt, use_ollama=config["ollama"]["enabled"])
 
             # Add the model response to state
             st.session_state.messages.append({"role": "assistant", "content": response})
